@@ -1,0 +1,286 @@
+"""Telegram Bot API HTTP 客户端。"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from urllib.parse import urlparse
+
+import json
+
+if TYPE_CHECKING:
+    import aiohttp
+
+try:
+    import aiohttp
+    from aiohttp import ClientTimeout
+
+    AIOHTTP_AVAILABLE = True
+except ImportError:
+    AIOHTTP_AVAILABLE = False
+
+try:
+    from aiohttp_socks import ProxyConnector  # type: ignore
+
+    SOCKS_AVAILABLE = True
+except ImportError:
+    SOCKS_AVAILABLE = False
+
+
+class TelegramClient:
+    """Telegram Bot API 异步客户端。"""
+
+    def __init__(
+        self,
+        token: str,
+        api_base: str = "https://api.telegram.org",
+        *,
+        proxy_url: Optional[str] = None,
+        proxy_enabled: bool = False,
+        proxy_from_env: bool = False,
+    ) -> None:
+        self.token = token
+        self.api_base = api_base.rstrip("/")
+        self._session: Optional[aiohttp.ClientSession] = None
+        self._proxy_url: Optional[str] = proxy_url if proxy_enabled and proxy_url else None
+        self._proxy_is_socks = self._is_socks(self._proxy_url) if self._proxy_url else False
+        self._trust_env: bool = bool(proxy_from_env)
+
+    @classmethod
+    def is_available(cls) -> bool:
+        return AIOHTTP_AVAILABLE
+
+    async def ensure_session(self) -> aiohttp.ClientSession:
+        if self._session is None or self._session.closed:
+            timeout = ClientTimeout(total=60)
+            connector = None
+            if self._proxy_is_socks and self._proxy_url and SOCKS_AVAILABLE:
+                connector = ProxyConnector.from_url(self._proxy_url)
+            self._session = aiohttp.ClientSession(
+                timeout=timeout, connector=connector, trust_env=self._trust_env
+            )
+        return self._session
+
+    async def close(self) -> None:
+        if self._session and not self._session.closed:
+            await self._session.close()
+
+    def _url(self, method: str) -> str:
+        return f"{self.api_base}/bot{self.token}/{method}"
+
+    def _http_proxy(self) -> Optional[str]:
+        if self._proxy_url and not self._proxy_is_socks:
+            return self._proxy_url
+        return None
+
+    @staticmethod
+    def _is_socks(proxy_url: Optional[str]) -> bool:
+        if not proxy_url:
+            return False
+        try:
+            return urlparse(proxy_url).scheme.lower().startswith("socks")
+        except Exception:
+            return False
+
+    @staticmethod
+    def _build_reply_parameters(reply_to: int) -> Dict[str, Any]:
+        return {"message_id": reply_to, "allow_sending_without_reply": True}
+
+    @classmethod
+    def _append_reply(cls, payload: Dict[str, Any], reply_to: Optional[int]) -> None:
+        if reply_to is not None:
+            payload["reply_parameters"] = cls._build_reply_parameters(reply_to)
+
+    @classmethod
+    def _append_reply_form(cls, form: aiohttp.FormData, reply_to: Optional[int]) -> None:
+        if reply_to is not None:
+            form.add_field("reply_parameters", json.dumps(cls._build_reply_parameters(reply_to)))
+
+    @staticmethod
+    def _append_topic(
+        payload: Dict[str, Any],
+        message_thread_id: Optional[int],
+        direct_messages_topic_id: Optional[int],
+    ) -> None:
+        if message_thread_id is not None:
+            payload["message_thread_id"] = message_thread_id
+        if direct_messages_topic_id is not None:
+            payload["direct_messages_topic_id"] = direct_messages_topic_id
+
+    @staticmethod
+    def _append_topic_form(
+        form: aiohttp.FormData,
+        message_thread_id: Optional[int],
+        direct_messages_topic_id: Optional[int],
+    ) -> None:
+        if message_thread_id is not None:
+            form.add_field("message_thread_id", str(message_thread_id))
+        if direct_messages_topic_id is not None:
+            form.add_field("direct_messages_topic_id", str(direct_messages_topic_id))
+
+    async def get_me(self) -> Dict[str, Any]:
+        session = await self.ensure_session()
+        async with session.get(self._url("getMe"), proxy=self._http_proxy()) as resp:
+            return await resp.json()
+
+    async def get_updates(
+        self,
+        offset: Optional[int] = None,
+        timeout: int = 20,
+        allowed_updates: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        session = await self.ensure_session()
+        payload: Dict[str, Any] = {"timeout": timeout}
+        if offset is not None:
+            payload["offset"] = offset
+        if allowed_updates is not None:
+            payload["allowed_updates"] = allowed_updates
+        async with session.post(
+            self._url("getUpdates"), json=payload, proxy=self._http_proxy()
+        ) as resp:
+            return await resp.json()
+
+    async def get_file_path(self, file_id: str) -> Optional[str]:
+        session = await self.ensure_session()
+        async with session.post(
+            self._url("getFile"), json={"file_id": file_id}, proxy=self._http_proxy()
+        ) as resp:
+            data = await resp.json()
+            if data.get("ok") and data.get("result"):
+                return data["result"].get("file_path")
+        return None
+
+    async def download_file_bytes(self, file_path: str) -> bytes:
+        session = await self.ensure_session()
+        file_url = f"{self.api_base}/file/bot{self.token}/{file_path}"
+        async with session.get(file_url, proxy=self._http_proxy()) as resp:
+            resp.raise_for_status()
+            return await resp.read()
+
+    async def send_message(
+        self,
+        chat_id: int | str,
+        text: str,
+        reply_to: Optional[int] = None,
+        message_thread_id: Optional[int] = None,
+        direct_messages_topic_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        session = await self.ensure_session()
+        payload: Dict[str, Any] = {"chat_id": chat_id, "text": text}
+        self._append_reply(payload, reply_to)
+        self._append_topic(payload, message_thread_id, direct_messages_topic_id)
+        async with session.post(self._url("sendMessage"), json=payload, proxy=self._http_proxy()) as resp:
+            return await resp.json()
+
+    async def send_photo_bytes(
+        self,
+        chat_id: int | str,
+        photo_bytes: bytes,
+        caption: Optional[str] = None,
+        reply_to: Optional[int] = None,
+        message_thread_id: Optional[int] = None,
+        direct_messages_topic_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        session = await self.ensure_session()
+        form = aiohttp.FormData()
+        form.add_field("chat_id", str(chat_id))
+        if caption:
+            form.add_field("caption", caption)
+        self._append_reply_form(form, reply_to)
+        self._append_topic_form(form, message_thread_id, direct_messages_topic_id)
+        form.add_field("photo", photo_bytes, filename="image.jpg", content_type="image/jpeg")
+        async with session.post(self._url("sendPhoto"), data=form, proxy=self._http_proxy()) as resp:
+            return await resp.json()
+
+    async def send_photo_url(
+        self,
+        chat_id: int | str,
+        url: str,
+        caption: Optional[str] = None,
+        reply_to: Optional[int] = None,
+        message_thread_id: Optional[int] = None,
+        direct_messages_topic_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        session = await self.ensure_session()
+        payload: Dict[str, Any] = {"chat_id": chat_id, "photo": url}
+        if caption:
+            payload["caption"] = caption
+        self._append_reply(payload, reply_to)
+        self._append_topic(payload, message_thread_id, direct_messages_topic_id)
+        async with session.post(self._url("sendPhoto"), json=payload, proxy=self._http_proxy()) as resp:
+            return await resp.json()
+
+    async def send_voice_bytes(
+        self,
+        chat_id: int | str,
+        voice_bytes: bytes,
+        caption: Optional[str] = None,
+        reply_to: Optional[int] = None,
+        message_thread_id: Optional[int] = None,
+        direct_messages_topic_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        session = await self.ensure_session()
+        form = aiohttp.FormData()
+        form.add_field("chat_id", str(chat_id))
+        if caption:
+            form.add_field("caption", caption)
+        self._append_reply_form(form, reply_to)
+        self._append_topic_form(form, message_thread_id, direct_messages_topic_id)
+        form.add_field("voice", voice_bytes, filename="voice.ogg", content_type="audio/ogg")
+        async with session.post(self._url("sendVoice"), data=form, proxy=self._http_proxy()) as resp:
+            return await resp.json()
+
+    async def send_animation_bytes(
+        self,
+        chat_id: int | str,
+        anim_bytes: bytes,
+        caption: Optional[str] = None,
+        reply_to: Optional[int] = None,
+        message_thread_id: Optional[int] = None,
+        direct_messages_topic_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        session = await self.ensure_session()
+        form = aiohttp.FormData()
+        form.add_field("chat_id", str(chat_id))
+        if caption:
+            form.add_field("caption", caption)
+        self._append_reply_form(form, reply_to)
+        self._append_topic_form(form, message_thread_id, direct_messages_topic_id)
+        form.add_field("animation", anim_bytes, filename="animation.gif", content_type="image/gif")
+        async with session.post(self._url("sendAnimation"), data=form, proxy=self._http_proxy()) as resp:
+            return await resp.json()
+
+    async def send_video_url(
+        self,
+        chat_id: int | str,
+        url: str,
+        caption: Optional[str] = None,
+        reply_to: Optional[int] = None,
+        message_thread_id: Optional[int] = None,
+        direct_messages_topic_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        session = await self.ensure_session()
+        payload: Dict[str, Any] = {"chat_id": chat_id, "video": url}
+        if caption:
+            payload["caption"] = caption
+        self._append_reply(payload, reply_to)
+        self._append_topic(payload, message_thread_id, direct_messages_topic_id)
+        async with session.post(self._url("sendVideo"), json=payload, proxy=self._http_proxy()) as resp:
+            return await resp.json()
+
+    async def send_document_url(
+        self,
+        chat_id: int | str,
+        url: str,
+        caption: Optional[str] = None,
+        reply_to: Optional[int] = None,
+        message_thread_id: Optional[int] = None,
+        direct_messages_topic_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        session = await self.ensure_session()
+        payload: Dict[str, Any] = {"chat_id": chat_id, "document": url}
+        if caption:
+            payload["caption"] = caption
+        self._append_reply(payload, reply_to)
+        self._append_topic(payload, message_thread_id, direct_messages_topic_id)
+        async with session.post(self._url("sendDocument"), json=payload, proxy=self._http_proxy()) as resp:
+            return await resp.json()
