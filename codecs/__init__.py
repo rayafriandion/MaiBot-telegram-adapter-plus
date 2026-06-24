@@ -166,9 +166,12 @@ class TelegramInboundCodec:
         sticker = msg.get("sticker")
         if sticker:
             if not (sticker.get("is_animated") or sticker.get("is_video")):
-                raw_bytes = await self._download_file_bytes(sticker.get("file_id"))
+                sticker_file_id = sticker.get("file_id")
+                raw_bytes = await self._download_file_bytes(sticker_file_id)
                 if raw_bytes:
-                    segs.append(self._build_binary_segment("emoji", raw_bytes))
+                    seg = self._build_binary_segment("emoji", raw_bytes)
+                    seg["file_id"] = sticker_file_id
+                    segs.append(seg)
                 else:
                     segs.append({"type": "text", "data": "[贴纸]"})
             else:

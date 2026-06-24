@@ -1,26 +1,23 @@
-<div align="center">
+# MaiBot-Telegram-Adapter-Plus
 
-![:name](https://count.getloli.com/@:MaiBot-Telegram-Adapter?name=%3AMaiBot-Telegram-Adapter&theme=miku&padding=7&offset=0&align=top&scale=1&pixelated=1&darkmode=auto)
+**MaiBot 的 Telegram 平台适配器插件** — 基于 [exynos967/MaiBot-Telegram-Adapter](https://github.com/exynos967/MaiBot-Telegram-Adapter) 的个人维护分支。
 
-# MaiBot-Telegram-Adapter
-
-**MaiBot 的 Telegram 平台适配器插件**
-
-将 Telegram Bot 与 [MaiBot](https://github.com/Mai-with-u/MaiBot) 无缝桥接
+将 Telegram Bot 与 [MaiBot](https://github.com/Mai-with-u/MaiBot) 无缝桥接。
 
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-AGPL--v3-green.svg)](LICENSE)
-[![maibot-plugin-sdk](https://img.shields.io/badge/SDK-maibot--plugin--sdk-orange)](https://github.com/Mai-with-u/maibot-plugin-sdk)
 
-</div>
+---
 
-### 安装
+## 与原版的区别
 
-将本仓库 clone 到 MaiBot 的 `plugins/` 目录下：
+本仓库为个人维护分支，在原版基础上按需调整。如有功能建议或 Bug 反馈，请优先提交到[原版仓库](https://github.com/exynos967/MaiBot-Telegram-Adapter)。
+
+## 安装
 
 ```bash
 cd /path/to/MaiBot/plugins
-git clone https://github.com/exynos967/MaiBot-Telegram-Adapter.git
+git clone https://github.com/rayafriandion/MaiBot-telegram-adapter-plus.git
 ```
 
 ### 依赖
@@ -41,37 +38,37 @@ pip install aiohttp-socks
 
 ```toml
 [plugin]
-enabled = true                # 启用插件
+enabled = true
 config_version = "0.1.0"
 
 [telegram_bot]
-token = "你的Bot Token"       # 必填，从 @BotFather 获取
+token = "你的Bot Token"
 api_base = "https://api.telegram.org"
 poll_timeout = 20
 proxy_enabled = false
-proxy_url = ""                # 例如 socks5://127.0.0.1:1080 或 http://127.0.0.1:7890
+proxy_url = ""
 proxy_from_env = false
 
 [chat]
-group_list_type = "whitelist" # whitelist / blacklist
-group_list = []               # chat_id 列表
+group_list_type = "whitelist"
+group_list = []
 private_list_type = "whitelist"
-private_list = []             # 用户 ID 列表
-ban_user_id = []              # 全局屏蔽用户
+private_list = []
+ban_user_id = []
 ```
 
 配置也可通过 MaiBot WebUI 的插件配置页面进行热重载修改。
 
 ### MaiBot 主配置
 
-MaiBot Core 仍会用主配置里的 bot 平台账号识别“机器人自己”。启用 Telegram 后，请在 MaiBot 主配置/webui配置的 `[bot]` 中加入 **Telegram Bot** 的**数字 ID**：
+在 MaiBot 主配置的 `[bot]` 中加入 Telegram Bot 的**数字 ID**：
 
 ```toml
 [bot]
 platforms = ["telegram:123456789"]
 ```
 
-也可以使用 `tg:123456789`。Bot 数字 ID 会在插件启动成功后通过**日志 `Telegram Bot: id=...` 输出**。若缺少该配置，MaiBot 的历史消息/提示词中可能无法把 bot 自身识别为配置的昵称。
+Bot 数字 ID 会在插件启动成功后的日志中输出。若缺少该配置，MaiBot 可能无法识别 bot 自身。
 
 ## 功能
 
@@ -89,6 +86,18 @@ platforms = ["telegram:123456789"]
 | 回复消息 | ✅ 关联消息 ID | ✅ reply_parameters |
 | @Bot | ✅ 多种识别方式 | — |
 
+### 流式传输
+
+支持 Telegram Bot API 9.3+ 的原生流式传输（`sendMessageDraft`）和模拟流式（`editMessageText`）。
+
+#### 原生流式（推荐）
+
+使用 `sendMessageDraft` API，在私聊中实现打字机效果。通过 `additional_config` 的 `draft_id` 触发。
+
+#### 模拟流式（editMessageText）
+
+使用 `sendMessage` + `editMessageText` 模拟流式效果。通过 `additional_config` 的 `simulate_stream` 触发。
+
 ### 其他特性
 
 - **黑白名单**：群组和私聊分别支持白名单/黑名单模式
@@ -97,6 +106,8 @@ platforms = ["telegram:123456789"]
 - **Topic 分流**：同群不同话题独立会话
 - **@Bot 识别**：支持 mention entity、reply、文本兜底匹配
 - **WebUI 热重载**：配置修改后自动重连
+- **流式传输**：原生 sendMessageDraft + 模拟 editMessageText 双模式
+- **富文本消息**：支持 sendRichMessage / sendRichMessageDraft（Bot API 10.1+）
 
 ## 创建 Telegram Bot
 
@@ -117,7 +128,7 @@ platforms = ["telegram:123456789"]
 ```
 MaiBot Host
     ↕ maibot_sdk MessageGateway (duplex)
-MaiBot-Telegram-Adapter Plugin
+MaiBot-Telegram-Adapter-Plus Plugin
     ↕ HTTPS (long-polling / Bot API)
 Telegram
 ```

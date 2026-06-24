@@ -1,4 +1,30 @@
+# Python
 __pycache__/
 *.pyc
 *.pyo
+*.py~
+*.swp
+*.swo
+
+# Config
+config.toml
 config.toml.backup.*
+config_back/
+
+# Temp
+voice_temp/
+
+# Editor
+.idea/
+.vscode/
+*.sublime-*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.*
+venv/
+.venv/

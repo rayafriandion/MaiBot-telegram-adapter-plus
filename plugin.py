@@ -13,10 +13,12 @@ from typing import Any, ClassVar, Dict, Optional, cast
 import asyncio
 import contextlib
 
-from maibot_sdk import MaiBotPlugin, MessageGateway, PluginConfigBase
+from maibot_sdk import MaiBotPlugin, MessageGateway, PluginConfigBase, Tool
+
+from .utils import parse_topic_group_id
 
 from .codecs import TelegramInboundCodec
-from .codecs.outbound import TelegramOutboundCodec
+from .codecs.outbound import TelegramOutboundCodec, _convert_to_ogg_opus
 from .config import TelegramPluginSettings
 from .constants import PLATFORM_NAME, TELEGRAM_GATEWAY_NAME
 from .filters import TelegramChatFilter
@@ -81,6 +83,132 @@ class TelegramAdapterPlugin(MaiBotPlugin):
 
         return result
 
+    @Tool(
+        name="send_sticker",
+        description="【Telegram 专用】从本地表情库发送一个随机表情包。"
+                    "此工具与 send_emoji 功能完全相同，仅用于 Telegram 平台。"
+                    "系统自动从本地表情库中随机挑选一个表情发送，不支持指定 file_id 或 URL。"
+                    "注意：不要尝试传入任何参数，此工具不接受 sticker、emoji 等参数。"
+                    "如果需要根据语境智能选择最匹配的表情，请使用 send_emoji 工具。",
+        parameters={},
+    )
+    async def handle_send_sticker(self, **kwargs: Any) -> Dict[str, Any]:
+        """从本地表情库随机选一个表情并发送。不接受任何用户提供的 file_id 或 URL。"""
+
+        stream_id = str(kwargs.get("stream_id") or kwargs.get("chat_id") or "").strip()
+        if not stream_id:
+            return {"success": False, "error": "无法确定目标聊天，请确保在聊天上下文中调用"}
+
+        # 从本地表情库获取一个随机表情
+        result = await self.ctx.emoji.get_random(count=1)
+        if not result or not result.get("success"):
+            return {"success": False, "error": "本地表情库为空或获取失败，无法发送表情"}
+
+        emojis = result.get("emojis", [])
+        if not emojis:
+            return {"success": False, "error": "本地表情库为空，无法发送表情"}
+
+        emoji_base64 = emojis[0].get("base64", "")
+        if not emoji_base64:
+            return {"success": False, "error": "表情数据为空，无法发送"}
+
+        try:
+            send_result = await self.ctx.send.emoji(
+                emoji_data=emoji_base64,
+                stream_id=stream_id,
+            )
+            if send_result:
+                return {"success": True, "message": "表情发送成功"}
+            else:
+                return {"success": False, "error": "表情发送失败"}
+        except Exception as exc:
+            self.ctx.logger.error(f"send_sticker 发送失败: {exc}")
+            return {"success": False, "error": str(exc)}
+
+    @Tool(
+        name="send_voice",
+        description="【Telegram 专用】发送语音消息到当前聊天。"
+                    "当需要发送语音消息时调用此工具。"
+                    "支持传入 base64 编码的音频数据（纯 base64 字符串或 data:audio/xxx;base64, 格式）。"
+                    "音频格式支持 OGG、MP3、WAV、FLAC 等，非 OGG/MP3 格式会自动转码。"
+                    "也可以传入 HTTPS URL 直接发送远程音频文件。",
+        parameters={
+            "audio_data": {
+                "type": "string",
+                "description": "音频数据：base64 编码字符串（纯 base64 或 data:audio/xxx;base64, 格式）或 HTTPS URL",
+                "required": True,
+            },
+            "caption": {
+                "type": "string",
+                "description": "语音消息的说明文字（可选）",
+                "required": False,
+            },
+        },
+    )
+    async def handle_send_voice(
+        self,
+        audio_data: str,
+        caption: str = "",
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """发送语音消息到当前聊天。
+
+        将 base64 音频数据解码为 buffer，用 multipart/form-data 通过 sendVoice API 发送。
+        非 OGG/MP3 格式会自动用 ffmpeg 转码为 OGG/Opus。
+        """
+        import base64 as _b64
+
+        stream_id = str(kwargs.get("stream_id") or kwargs.get("chat_id") or "").strip()
+        if not stream_id:
+            return {"success": False, "error": "无法确定目标聊天，请确保在聊天上下文中调用"}
+
+        audio_data = audio_data.strip()
+        if not audio_data:
+            return {"success": False, "error": "音频数据为空"}
+
+        try:
+            # 处理 URL 格式
+            if audio_data.startswith("http"):
+                result = await self._outbound_codec._tg.send_voice_url(
+                    stream_id, audio_data,
+                    caption=caption or None,
+                )
+                if result.get("ok"):
+                    return {"success": True, "message": "语音发送成功（URL）"}
+                return {"success": False, "error": f"语音发送失败: {result.get('description', result)}"}
+
+            # 处理 base64 格式
+            b64_str = audio_data
+            if b64_str.startswith("data:"):
+                comma_idx = b64_str.find(",")
+                if comma_idx != -1:
+                    b64_str = b64_str[comma_idx + 1:]
+            elif b64_str.startswith("base64://"):
+                b64_str = b64_str[len("base64://"):]
+
+            b64_str = b64_str.strip()
+            audio_bytes = _b64.b64decode(b64_str)
+
+            # 检测格式，非 OGG/MP3 则转码
+            filename, _ = self._outbound_codec._tg._detect_audio_format(audio_bytes)
+            fmt = filename.rsplit(".", 1)[-1] if "." in filename else ""
+            if fmt in ("wav", "flac", "webm", "m4a"):
+                self.ctx.logger.info(f"语音格式 {fmt} 需要转码为 OGG/Opus")
+                audio_bytes = await _convert_to_ogg_opus(audio_bytes, fmt)
+
+            # 用 multipart/form-data 发送
+            result = await self._outbound_codec._tg.send_voice_bytes(
+                stream_id, audio_bytes,
+                caption=caption or None,
+            )
+            if result.get("ok"):
+                return {"success": True, "message": "语音发送成功"}
+            return {"success": False, "error": f"语音发送失败: {result.get('description', result)}"}
+
+        except Exception as exc:
+            self.ctx.logger.error(f"send_voice 发送失败: {exc}")
+            return {"success": False, "error": str(exc)}
+
     def _load_settings(self) -> TelegramPluginSettings:
         return cast(TelegramPluginSettings, self.config)
 
@@ -103,10 +231,22 @@ class TelegramAdapterPlugin(MaiBotPlugin):
         self._tg_client = TelegramClient(
             token=bot_cfg.token,
             api_base=bot_cfg.api_base,
-            proxy_url=bot_cfg.proxy_url if bot_cfg.proxy_enabled else None,
-            proxy_enabled=bot_cfg.proxy_enabled,
-            proxy_from_env=bot_cfg.proxy_from_env,
+            proxy_mode=bot_cfg.proxy_mode,
+            proxy_url=bot_cfg.proxy_url or None,
         )
+        # 输出代理状态日志
+        proxy_mode = bot_cfg.proxy_mode
+        if proxy_mode == "disabled":
+            self.ctx.logger.info("Telegram 代理: 已禁用")
+        elif proxy_mode == "manual":
+            self.ctx.logger.info(f"Telegram 代理(手动): {bot_cfg.proxy_url or '未填写'}")
+        elif proxy_mode == "env":
+            self.ctx.logger.info("Telegram 代理: 从环境变量读取 (HTTP_PROXY/HTTPS_PROXY)")
+        else:
+            # auto 模式
+            detected = self._tg_client._proxy_url
+            self.ctx.logger.info(f"Telegram 代理(自动检测): {detected or '未检测到，将尝试环境变量'}")
+
         self._inbound_codec = TelegramInboundCodec(self._tg_client, self.ctx.logger)
         self._outbound_codec = TelegramOutboundCodec(self._tg_client, self.ctx.logger)
         self._chat_filter = TelegramChatFilter(self.ctx.logger)
@@ -178,6 +318,8 @@ class TelegramAdapterPlugin(MaiBotPlugin):
         settings = self._load_settings()
         timeout = settings.telegram_bot.poll_timeout
         allowed_updates = ["message", "edited_message"]
+        consecutive_errors = 0
+        max_consecutive_errors = 10
 
         self.ctx.logger.info("Telegram 适配器开始轮询...")
 
@@ -187,15 +329,30 @@ class TelegramAdapterPlugin(MaiBotPlugin):
                 if tg_client is None:
                     break
 
+                # 主动重建 session（代理连接可能已断开）
+                await tg_client.ensure_session()
+
                 resp = await tg_client.get_updates(
                     offset=offset, timeout=timeout, allowed_updates=allowed_updates
                 )
                 if not resp.get("ok"):
-                    self.ctx.logger.warning(f"Telegram getUpdates 失败: {resp}")
-                    await asyncio.sleep(1)
+                    consecutive_errors += 1
+                    self.ctx.logger.warning(
+                        f"Telegram getUpdates 失败 ({consecutive_errors}/{max_consecutive_errors}): {resp}"
+                    )
+                    if consecutive_errors >= max_consecutive_errors:
+                        self.ctx.logger.error("连续失败次数过多，重建 session")
+                        await tg_client.close()
+                        consecutive_errors = 0
+                    await asyncio.sleep(min(consecutive_errors * 2, 30))
                     continue
 
-                for update in resp.get("result", []):
+                consecutive_errors = 0
+                updates = resp.get("result", [])
+                if updates:
+                    self.ctx.logger.debug(f"收到 {len(updates)} 条更新")
+
+                for update in updates:
                     offset = update.get("update_id", 0) + 1
                     asyncio.create_task(
                         self._handle_update(update),
@@ -204,8 +361,17 @@ class TelegramAdapterPlugin(MaiBotPlugin):
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                self.ctx.logger.error(f"Telegram 轮询异常: {e}")
-                await asyncio.sleep(2)
+                consecutive_errors += 1
+                self.ctx.logger.error(f"Telegram 轮询异常 ({consecutive_errors}/{max_consecutive_errors}): {e}")
+                if consecutive_errors >= max_consecutive_errors:
+                    self.ctx.logger.error("连续异常次数过多，重建 session")
+                    try:
+                        if self._tg_client:
+                            await self._tg_client.close()
+                    except Exception:
+                        pass
+                    consecutive_errors = 0
+                await asyncio.sleep(min(consecutive_errors * 2, 30))
 
     async def _handle_update(self, update: Dict[str, Any]) -> None:
         """处理单个 Telegram Update。"""

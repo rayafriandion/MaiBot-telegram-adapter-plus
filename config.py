@@ -68,25 +68,24 @@ class TelegramBotConfig(PluginConfigBase):
         description="长轮询超时时间（秒）。",
         json_schema_extra={"label": "轮询超时（秒）", "order": 2, "step": 1},
     )
-    proxy_enabled: bool = Field(
-        default=False,
-        description="是否启用代理。",
-        json_schema_extra={"label": "启用代理", "order": 3},
+    proxy_mode: Literal["disabled", "auto", "env", "manual"] = Field(
+        default="auto",
+        description="代理模式。",
+        json_schema_extra={
+            "hint": "auto=自动检测系统代理, env=读取环境变量(http_proxy/https_proxy), manual=手动指定代理地址, disabled=不使用代理",
+            "label": "代理模式",
+            "order": 3,
+        },
     )
     proxy_url: str = Field(
         default="",
-        description="代理地址（HTTP/SOCKS5）。",
+        description="代理地址（HTTP/SOCKS5）。仅在代理模式为 manual 时需要填写。",
         json_schema_extra={
-            "hint": "支持 http:// 和 socks5:// 协议。",
+            "hint": "支持 http:// 和 socks5:// 协议。代理模式为 manual 时必填。",
             "label": "代理地址",
             "order": 4,
             "placeholder": "http://127.0.0.1:7890",
         },
-    )
-    proxy_from_env: bool = Field(
-        default=False,
-        description="是否从环境变量读取代理。",
-        json_schema_extra={"label": "从环境变量读取代理", "order": 5},
     )
 
     @field_validator("token", "api_base", "proxy_url", mode="before")
