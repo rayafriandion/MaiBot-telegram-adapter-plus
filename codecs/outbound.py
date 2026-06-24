@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import shutil
 import subprocess
 import tempfile
+import time
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -23,6 +25,29 @@ def _get_voice_temp_dir() -> Path:
     """获取 voice_temp 目录，不存在则创建。"""
     _VOICE_TEMP_DIR.mkdir(parents=True, exist_ok=True)
     return _VOICE_TEMP_DIR
+
+
+def _safe_dir_name(chat_id: str) -> str:
+    """将 chat_id 转为安全的目录名，防止路径遍历。"""
+    return hashlib.sha256(chat_id.encode("utf-8")).hexdigest()[:16]
+
+
+def _cleanup_old_voice_temp(max_age_seconds: int = 3600) -> None:
+    """清理 voice_temp 下超过 max_age_seconds 的临时子目录。"""
+    if not _VOICE_TEMP_DIR.exists():
+        return
+    now = time.time()
+    try:
+        for child in _VOICE_TEMP_DIR.iterdir():
+            if child.is_dir():
+                try:
+                    age = now - child.stat().st_mtime
+                    if age > max_age_seconds:
+                        shutil.rmtree(child, ignore_errors=True)
+                except Exception:
+                    pass
+    except Exception:
+        pass
 
 
 # Telegram 视频贴纸限制
@@ -159,7 +184,7 @@ async def _convert_to_ogg_opus(raw_bytes: bytes, src_format: str) -> bytes:
         return raw_bytes
 
     # 在插件 voice_temp 目录下创建本次转码的临时子目录
-    tmp = _get_voice_temp_dir() / f"ogg_{src_format}_{id(raw_bytes) & 0xFFFF:04x}"
+    tmp = _get_voice_temp_dir() / f"ogg_{src_format}_{hashlib.sha256(id(raw_bytes).to_bytes(8, 'little')).hexdigest()[:8]}"
     tmp.mkdir(parents=True, exist_ok=True)
     input_path = tmp / f"input.{src_format}"
     output_path = tmp / "output.ogg"
@@ -827,7 +852,7 @@ class TelegramOutboundCodec:
                     self._logger.warning("ffmpeg 不可用，直接发送原始音频数据")
                 else:
                     # 在插件 voice_temp 目录下创建临时子目录
-                    tmpdir_save = _get_voice_temp_dir() / f"voice_{chat_id}_{id(audio_bytes) & 0xFFFF:04x}"
+                    tmpdir_save = _get_voice_temp_dir() / f"voice_{_safe_dir_name(chat_id)}_{id(audio_bytes) & 0xFFFF:04x}"
                     tmpdir_save.mkdir(parents=True, exist_ok=True)
                     input_path = tmpdir_save / f"input.{src_fmt}"
                     output_path = tmpdir_save / "output.ogg"

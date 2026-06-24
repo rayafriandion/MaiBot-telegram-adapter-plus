@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ipaddress
+import socket
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 from urllib.parse import urlparse
 
@@ -9,6 +11,49 @@ import json
 
 if TYPE_CHECKING:
     import aiohttp
+
+MAX_DOWNLOAD_SIZE = 50 * 1024 * 1024
+
+_DEFAULT_API_BASE = "https://api.telegram.org"
+
+_PRIVATE_NETWORKS = [
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("169.254.0.0/16"),
+]
+
+
+def _is_private_ip(hostname: str) -> bool:
+    try:
+        addrinfos = socket.getaddrinfo(hostname, None)
+        for family, _, _, _, sockaddr in addrinfos:
+            ip = ipaddress.ip_address(sockaddr[0])
+            if any(ip in net for net in _PRIVATE_NETWORKS):
+                return True
+    except socket.gaierror:
+        return True
+    return False
+
+
+def _validate_api_base(api_base: str) -> str:
+    try:
+        parsed = urlparse(api_base)
+    except Exception:
+        return _DEFAULT_API_BASE
+
+    if parsed.scheme.lower() != "https":
+        return _DEFAULT_API_BASE
+
+    hostname = parsed.hostname
+    if not hostname:
+        return _DEFAULT_API_BASE
+
+    if _is_private_ip(hostname):
+        return _DEFAULT_API_BASE
+
+    return api_base.rstrip("/")
 
 try:
     import aiohttp
@@ -66,7 +111,7 @@ class TelegramClient:
         proxy_url: Optional[str] = None,
     ) -> None:
         self.token = token
-        self.api_base = api_base.rstrip("/")
+        self.api_base = _validate_api_base(api_base)
         self._session: Optional[aiohttp.ClientSession] = None
 
         # 解析代理配置
@@ -98,6 +143,12 @@ class TelegramClient:
     @classmethod
     def is_available(cls) -> bool:
         return AIOHTTP_AVAILABLE
+
+    def _mask_token(self) -> str:
+        token = self.token
+        if len(token) > 10:
+            return f"{token[:6]}****{token[-3:]}"
+        return "****"
 
     async def ensure_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
@@ -288,11 +339,13 @@ class TelegramClient:
         return None
 
     async def download_file_bytes(self, file_path: str) -> bytes:
+        if not file_path or ".." in file_path or file_path.startswith("/"):
+            return b""
         session = await self.ensure_session()
         file_url = f"{self.api_base}/file/bot{self.token}/{file_path}"
         async with session.get(file_url, proxy=self._http_proxy()) as resp:
             resp.raise_for_status()
-            return await resp.read()
+            return await resp.read(max_size=MAX_DOWNLOAD_SIZE)
 
     async def send_message_draft(
         self,

@@ -39,6 +39,7 @@ class TelegramAdapterPlugin(MaiBotPlugin):
         self._poll_task: Optional[asyncio.Task[None]] = None
         self._stop_requested: bool = False
         self._bot_account_id: str = ""
+        self._semaphore: Optional[asyncio.Semaphore] = None
 
     async def on_load(self) -> None:
         """插件加载时根据配置决定是否启动轮询。"""
@@ -167,8 +168,10 @@ class TelegramAdapterPlugin(MaiBotPlugin):
             return {"success": False, "error": "音频数据为空"}
 
         try:
-            # 处理 URL 格式
+            # 处理 URL 格式（强制 HTTPS）
             if audio_data.startswith("http"):
+                if not audio_data.startswith("https"):
+                    return {"success": False, "error": "仅支持 HTTPS 协议的音频 URL"}
                 result = await self._outbound_codec._tg.send_voice_url(
                     stream_id, audio_data,
                     caption=caption or None,
@@ -321,6 +324,7 @@ class TelegramAdapterPlugin(MaiBotPlugin):
         consecutive_errors = 0
         max_consecutive_errors = 10
 
+        self._semaphore = asyncio.Semaphore(10)
         self.ctx.logger.info("Telegram 适配器开始轮询...")
 
         while not self._stop_requested:
@@ -329,7 +333,6 @@ class TelegramAdapterPlugin(MaiBotPlugin):
                 if tg_client is None:
                     break
 
-                # 主动重建 session（代理连接可能已断开）
                 await tg_client.ensure_session()
 
                 resp = await tg_client.get_updates(
@@ -355,7 +358,7 @@ class TelegramAdapterPlugin(MaiBotPlugin):
                 for update in updates:
                     offset = update.get("update_id", 0) + 1
                     asyncio.create_task(
-                        self._handle_update(update),
+                        self._handle_update_with_semaphore(update),
                         name="telegram_adapter.handle_update",
                     )
             except asyncio.CancelledError:
@@ -372,6 +375,16 @@ class TelegramAdapterPlugin(MaiBotPlugin):
                         pass
                     consecutive_errors = 0
                 await asyncio.sleep(min(consecutive_errors * 2, 30))
+
+    async def _handle_update_with_semaphore(self, update: Dict[str, Any]) -> None:
+        semaphore = self._semaphore
+        if semaphore is None:
+            return
+        await semaphore.acquire()
+        try:
+            await self._handle_update(update)
+        finally:
+            semaphore.release()
 
     async def _handle_update(self, update: Dict[str, Any]) -> None:
         """处理单个 Telegram Update。"""
