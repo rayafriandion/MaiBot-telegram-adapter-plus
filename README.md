@@ -9,10 +9,6 @@
 
 ---
 
-## 与原版的区别
-
-本仓库为个人维护分支，在原版基础上按需调整。如有功能建议或 Bug 反馈，请优先提交到[原版仓库](https://github.com/exynos967/MaiBot-Telegram-Adapter)。
-
 ## 安装
 
 ```bash

@@ -29,7 +29,11 @@
     "send.image",
     "send.command",
     "config.get_plugin",
-    "tool.get_definitions"
+    "tool.get_definitions",
+    "subprocess.exec.ffmpeg",
+    "filesystem.write.voice_temp",
+    "filesystem.tempfile",
+    "network.http.telegram_api"
   ],
   "i18n": {
     "default_locale": "zh-CN",
