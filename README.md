@@ -25,6 +25,21 @@ git clone https://github.com/rayafriandion/MaiBot-telegram-adapter-plus.git
 - `maibot_sdk` >= 2.0.0（由 MaiBot 主程序提供）
 - `aiohttp` >= 3.9.0（MaiBot 主程序已包含）
 - `aiohttp-socks` >= 0.8.4（可选，使用 SOCKS 代理时需要）
+- **ffmpeg**（系统依赖，可选，用于贴纸转换和音频转码）
+
+#### ffmpeg
+
+贴纸发送和音频转码功能依赖系统安装的 **ffmpeg**。如果未安装，相关功能会优雅降级（跳过转码，发送原始数据）。
+
+- **Windows**：从 https://ffmpeg.org/download.html 下载，将 `ffmpeg.exe` 所在目录添加到 PATH
+- **Linux**：`apt install ffmpeg`（Debian/Ubuntu）或 `yum install ffmpeg`（CentOS/RHEL）
+- **macOS**：`brew install ffmpeg`
+
+验证安装：
+
+```bash
+ffmpeg -version
+```
 
 如需 SOCKS 代理支持：
 

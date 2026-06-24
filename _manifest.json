@@ -22,7 +22,15 @@
     "max_version": "2.99.99"
   },
   "dependencies": [],
-  "capabilities": [],
+  "capabilities": [
+    "emoji.get_random",
+    "send.emoji",
+    "send.text",
+    "send.image",
+    "send.command",
+    "config.get_plugin",
+    "tool.get_definitions"
+  ],
   "i18n": {
     "default_locale": "zh-CN",
     "supported_locales": [
