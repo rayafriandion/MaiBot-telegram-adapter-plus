@@ -3,16 +3,10 @@
   "version": "1.1.0",
   "name": "Telegram_Adapter_Plus",
   "description": "Telegram Bot API adapter plugin for MaiBot (fork by Raya Friandion)",
-  "author": [
-    {
-      "name": "薄暝",
-      "url": "https://github.com/exynos967"
-    },
-    {
-      "name": "Raya Friandion",
-      "url": "https://github.com/rayafriandion"
-    }
-  ],
+  "author": {
+    "name": "薄暝, Raya Friandion",
+    "url": "https://github.com/rayafriandion/MaiBot-telegram-adapter-plus"
+  },
   "license": "AGPL-v3.0-or-later",
   "urls": {
     "repository": "https://github.com/rayafriandion/MaiBot-telegram-adapter-plus",

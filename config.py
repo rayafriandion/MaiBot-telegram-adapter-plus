@@ -40,7 +40,7 @@ class TelegramPluginOptions(PluginConfigBase):
 class TelegramBotConfig(PluginConfigBase):
     """Telegram Bot 连接配置。"""
 
-    __ui_label__: ClassVar[str] = "Telegram Bot"
+    __ui_label__: ClassVar[str] = "Telegram 连接设置"
     __ui_order__: ClassVar[int] = 1
 
     token: str = Field(
