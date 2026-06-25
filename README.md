@@ -120,6 +120,14 @@ Bot 数字 ID 会在插件启动成功后的日志中输出。若缺少该配置
 - **流式传输**：原生 sendMessageDraft + 模拟 editMessageText 双模式
 - **富文本消息**：支持 sendRichMessage / sendRichMessageDraft（Bot API 10.1+）
 
+### 插件内部行为说明
+
+以下行为由插件在进程内直接执行，不通过 SDK capability 机制：
+
+- **ffmpeg 子进程调用**：视频贴纸转 WEBM 格式和音频转码（WAV/FLAC/M4A → OGG/Opus）时，通过 `asyncio.create_subprocess_exec` 调用系统 ffmpeg。未安装 ffmpeg 时相关功能优雅降级。
+- **临时文件读写**：ffmpeg 转码过程中使用 Python `tempfile` 模块创建临时文件，转换完成后自动清理。
+- **Telegram Bot API 网络请求**：通过 `aiohttp` 直接请求 Telegram Bot API（长轮询 getUpdates 和所有出站 API 调用），不走 SDK 的 `network.http` capability。
+
 ## 创建 Telegram Bot
 
 1. 在 Telegram 中搜索 [@BotFather](https://t.me/BotFather)

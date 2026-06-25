@@ -23,18 +23,11 @@
   },
   "dependencies": [],
   "capabilities": [
+    "gateway",
     "emoji.get_random",
-    "send.emoji",
-    "send.text",
-    "send.image",
-    "send.command",
-    "config.get_plugin",
-    "tool.get_definitions",
-    "subprocess.exec.ffmpeg",
-    "filesystem.write.voice_temp",
-    "filesystem.tempfile",
-    "network.http.telegram_api"
+    "send.emoji"
   ],
+  "plugin_type": "adapter",
   "i18n": {
     "default_locale": "zh-CN",
     "supported_locales": [

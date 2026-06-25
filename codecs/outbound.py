@@ -275,12 +275,15 @@ class TelegramOutboundCodec:
         if action is None:
             return
 
+        self._logger.info(f"发送 chat action: {action} → chat_id={chat_id}")
         try:
-            await self._tg.send_chat_action(
+            result = await self._tg.send_chat_action(
                 chat_id, action, message_thread_id=message_thread_id
             )
+            if not result.get("ok"):
+                self._logger.warning(f"chat action '{action}' 返回失败: {result}")
         except Exception as e:
-            self._logger.debug(f"发送 chat action '{action}' 失败: {e}")
+            self._logger.warning(f"发送 chat action '{action}' 异常: {e}")
 
     # ---- 模拟流式核心逻辑 ----
 
